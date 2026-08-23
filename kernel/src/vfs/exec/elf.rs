@@ -366,7 +366,10 @@ impl ElfFormat {
     ) -> EResult<ElfInfo> {
         // Read the header.
         let mut hdr_data = [0u8; size_of::<ElfHdr>()];
-        file.pread_kernel(&mut hdr_data, 0)?;
+        let header_read = file.pread_kernel(&mut hdr_data, 0)?;
+        if header_read != hdr_data.len() as isize {
+            return Err(Errno::ENOEXEC);
+        }
         let elf_hdr = bytemuck::pod_read_unaligned::<ElfHdr>(&hdr_data);
 
         // TODO: Do the rest of IDENT checks.
@@ -374,6 +377,9 @@ impl ElfFormat {
             return Err(Errno::ENOEXEC);
         }
         if elf_hdr.e_machine != EM_CURRENT {
+            return Err(Errno::ENOEXEC);
+        }
+        if elf_hdr.e_phentsize as usize != size_of::<ElfPhdr>() {
             return Err(Errno::ENOEXEC);
         }
 
@@ -387,10 +393,15 @@ impl ElfFormat {
         // Iterate all PHDRs.
         for i in 0..elf_hdr.e_phnum {
             let mut phdr_data = vec![0u8; elf_hdr.e_phentsize as usize];
-            file.pread_kernel(
+
+            if file.pread_kernel(
                 &mut phdr_data,
                 elf_hdr.e_phoff + (elf_hdr.e_phentsize as u64 * i as u64),
-            )?;
+            )? != phdr_data.len() as isize
+            {
+                return Err(Errno::ENOEXEC);
+            }
+
             let phdr = bytemuck::pod_read_unaligned::<ElfPhdr>(&phdr_data);
 
             match phdr.p_type {
