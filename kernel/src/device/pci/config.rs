@@ -1,8 +1,4 @@
-use super::{
-    config,
-    device::PciBar,
-    generic::{CAPABILITIES_PTR, REG13},
-};
+use super::{config, device::PciBar};
 use crate::{
     arch,
     irq::{IrqLine, Polarity, TriggerMode},
@@ -27,6 +23,7 @@ pub mod common {
     pub const REG1: Register<u32> = Register::new(0x04).with_le();
     pub const COMMAND: Field<u32, u16> = Field::new(REG1, 0);
     pub const STATUS: Field<u32, u16> = Field::new(REG1, 2);
+    pub const STATUS_CAP_LIST: u16 = 1 << 4;
 
     pub const REG2: Register<u32> = Register::new(0x08).with_le();
     pub const PROG_IF: Field<u32, u8> = Field::new(REG2, 0x01);
@@ -34,6 +31,37 @@ pub mod common {
     pub const CLASS_CODE: Field<u32, u8> = Field::new(REG2, 0x03);
 
     pub const REG3: Register<u32> = Register::new(0x0C).with_le();
+    pub const HEADER_TYPE: Field<u32, u8> = Field::new(REG3, 0x02);
+    pub const HEADER_TYPE_MULTIFUNCTION: u8 = 0x80;
+    pub const HEADER_TYPE_BRIDGE: u8 = 0x01;
+}
+
+pub mod bridge {
+    use crate::memory::view::{Field, Register};
+
+    pub const REG6: Register<u32> = Register::new(0x18).with_le();
+    pub const SECONDARY_BUS: Field<u32, u8> = Field::new(REG6, 0x01);
+}
+
+pub mod cap {
+    pub const MSI: u8 = 0x05;
+    pub const PCIE: u8 = 0x10;
+    pub const MSIX: u8 = 0x11;
+}
+
+pub mod pcie {
+    pub const CAP_FLAGS: u32 = 0x02;
+    pub const LINK_CAP: u32 = 0x0C;
+    pub const LINK_STATUS: u32 = 0x12;
+
+    pub const CAP_FLAGS_TYPE_SHIFT: u16 = 4;
+    pub const CAP_FLAGS_TYPE_MASK: u16 = 0xF;
+
+    pub const TYPE_ROOT_PORT: u8 = 0x4;
+    pub const TYPE_DOWNSTREAM_PORT: u8 = 0x6;
+
+    pub const LINK_CAP_DLL_ACTIVE_REPORTING: u32 = 1 << 20;
+    pub const LINK_STATUS_DLL_ACTIVE: u16 = 1 << 13;
 }
 
 pub mod generic {
@@ -152,8 +180,8 @@ impl<'a> DeviceView<'a> {
     pub fn capabilities(&mut self) -> CapIter<'_, 'a> {
         CapIter {
             ptr: self
-                .read_reg(REG13)
-                .map(|x| x.read_field(CAPABILITIES_PTR).value())
+                .read_reg(generic::REG13)
+                .map(|x| x.read_field(generic::CAPABILITIES_PTR).value())
                 .unwrap(),
             view: self,
         }
@@ -178,27 +206,49 @@ impl<'a> DeviceView<'a> {
             command_register & !(1 << 0 | 1 << 1),
         );
 
-        // Probe the size of this BAR.
+        // A 64-bit BAR occupies this register and the next one.
+        let is_64bit_pair = is_mmio64 && index + 1 < 6;
+        let high_offset = bar_offset + size_of::<u32>();
+        let high = is_64bit_pair.then(|| self.access.read32(self.address, high_offset as u32));
+
         self.access
             .write32(self.address, bar_offset as u32, 0xFFFF_FFFF);
+        if is_64bit_pair {
+            self.access
+                .write32(self.address, high_offset as u32, 0xFFFF_FFFF);
+        }
 
-        let new_bar = self.access.read32(self.address, bar_offset as u32);
+        let mask_low = self.access.read32(self.address, bar_offset as u32);
+        let mask_high = is_64bit_pair.then(|| self.access.read32(self.address, high_offset as u32));
 
-        // Restore the original BAR value.
+        // Restore the original BAR value(s).
         self.access.write32(self.address, bar_offset as u32, bar);
+        if let Some(high) = high {
+            self.access.write32(self.address, high_offset as u32, high);
+        }
+
+        let addr_mask: u64 = if is_mmio { !0xF } else { !0x3 };
+        let raw = (mask_high.unwrap_or(0) as u64) << 32 | mask_low as u64;
+        let masked = raw
+            & addr_mask
+            & if is_64bit_pair {
+                u64::MAX
+            } else {
+                u32::MAX as u64
+            };
+        let size = if masked == 0 {
+            // The function decodes no address bits here, the BAR is unimplemented.
+            0
+        } else {
+            1u64 << masked.trailing_zeros()
+        } as usize;
 
         let kind = if is_mmio {
-            let address = (bar & 0xFFFF_FFF0) as usize;
-            let size = (!(new_bar & 0xFFFF_FFF0) + 1) as usize;
+            let address = (bar & 0xFFFF_FFF0) as u64;
 
-            if is_mmio64 {
-                assert!(index + 1 < 6);
-
-                let next_bar_offset = bar_offset + size_of::<u32>();
-                let next_bar = self.access.read32(self.address, next_bar_offset as u32);
-
+            if is_64bit_pair {
                 PciBar::Mmio64 {
-                    address: (next_bar as u64) << 32 | (address as u64),
+                    address: (high.unwrap_or(0) as u64) << 32 | address,
                     size,
                     prefetchable: is_prefetchable,
                 }
@@ -210,11 +260,8 @@ impl<'a> DeviceView<'a> {
                 }
             }
         } else {
-            let address = (bar & 0x0000_FFF0) as usize;
-            let size = (!(new_bar & 0xFFFF_FFFC) + 1) as usize;
-
             PciBar::Io {
-                address: address as u16,
+                address: (bar & 0xFFFF_FFFC) as u16,
                 size,
             }
         };
@@ -230,6 +277,9 @@ impl<'a> DeviceView<'a> {
     }
 
     pub fn setup_msix(&mut self) -> EResult<Arc<dyn IrqLine>> {
+        /// One MSI-X table entry: message address + data + vector control
+        const ENTRY_SIZE: usize = 8 + 4 + 4;
+
         let (bir, table_offset) = {
             let mut found = None;
             for mut cap in self.capabilities() {
@@ -252,10 +302,15 @@ impl<'a> DeviceView<'a> {
             _ => return Err(Errno::EINVAL),
         };
 
+        let page_size = arch::virt::get_page_size();
+        let table_phys = bar_addr + table_offset;
+        let page_base = align_down(table_phys, page_size);
+        let page_offset = table_phys - page_base;
+
         let table_view = unsafe {
             MmioView::new(
-                PhysAddr::new(bar_addr + table_offset),
-                16,
+                PhysAddr::new(page_base),
+                page_offset + ENTRY_SIZE,
                 VmCacheType::Uncacheable,
             )
         };
@@ -268,10 +323,10 @@ impl<'a> DeviceView<'a> {
         let msg_addr = msi.msg_addr().value() as u64;
         let msg_data = msi.msg_data();
         unsafe {
-            let addr_lo: Register<u32> = Register::new(0x00).with_le();
-            let addr_hi: Register<u32> = Register::new(0x04).with_le();
-            let data_reg: Register<u32> = Register::new(0x08).with_le();
-            let ctrl_reg: Register<u32> = Register::new(0x0C).with_le();
+            let addr_lo: Register<u32> = Register::new(page_offset).with_le();
+            let addr_hi: Register<u32> = Register::new(page_offset + 0x04).with_le();
+            let data_reg: Register<u32> = Register::new(page_offset + 0x08).with_le();
+            let ctrl_reg: Register<u32> = Register::new(page_offset + 0x0C).with_le();
             table_view.write_reg(addr_lo, msg_addr as u32);
             table_view.write_reg(addr_hi, (msg_addr >> 32) as u32);
             table_view.write_reg(data_reg, msg_data);
@@ -407,14 +462,14 @@ impl<'a, 'b> Iterator for CapIter<'a, 'b> {
         }
 
         let cur = self.ptr;
-        let reg: Register<u32> = Register::new(self.ptr as usize);
-        let field: Field<_, u8> = Field::new_bits(reg, 8..=15);
+        let header = self.view.access.read32(self.view.address, cur as u32);
 
-        self.ptr = self
-            .view
-            .read_reg(reg)
-            .map(|x| x.read_field(field).value())
-            .unwrap();
+        // If true, the function stopped responding.
+        if header as u8 == 0xFF {
+            return None;
+        }
+
+        self.ptr = (header >> 8) as u8 & !0x3;
 
         Some(Capability {
             view: self.view.clone(),
@@ -441,7 +496,7 @@ impl<'a> Capability<'a, ()> {
     }
 
     pub fn msi(&mut self) -> Option<Capability<'a, MsiCapability>> {
-        (self.id() == 0x05).then_some(Capability {
+        (self.id() == cap::MSI).then_some(Capability {
             view: self.view.clone(),
             cap: self.cap,
             _p: PhantomData,
@@ -449,7 +504,7 @@ impl<'a> Capability<'a, ()> {
     }
 
     pub fn msix(&mut self) -> Option<Capability<'a, MsiXCapability>> {
-        (self.id() == 0x11).then_some(Capability {
+        (self.id() == cap::MSIX).then_some(Capability {
             view: self.view.clone(),
             cap: self.cap,
             _p: PhantomData,
