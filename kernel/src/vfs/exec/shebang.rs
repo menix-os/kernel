@@ -81,6 +81,6 @@ impl ExecFormat for ShebangFormat {
     depends = [crate::memory::MEMORY_STAGE],
     entails = [crate::vfs::VFS_STAGE],
 )]
-fn ELF_STAGE() {
+fn SHEBANG_STAGE() {
     super::register(&ShebangFormat);
 }
