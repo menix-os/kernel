@@ -196,7 +196,7 @@ pub(crate) fn dispatch(frame: &mut Context) {
         numbers::FALLOCATE => vfs::fallocate,
         numbers::FADVISE => vfs::fadvise,
         numbers::UTIMENSAT => vfs::utimensat,
-        numbers::MKNODAT => sys_unimpl!("mknodat", Err(Errno::ENOSYS)),
+        numbers::MKNODAT => vfs::mknodat,
         numbers::GETCWD => vfs::getcwd,
         numbers::CHDIR => vfs::chdir,
         numbers::FCHDIR => vfs::fchdir,
