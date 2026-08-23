@@ -8,7 +8,7 @@ use crate::{
     },
     util::once::Once,
 };
-use alloc::{slice, string::String, vec::Vec};
+use alloc::{slice, string::String};
 use core::fmt;
 
 pub struct DeviceTree<'a> {
@@ -118,11 +118,11 @@ pub struct Node<'a, 'b> {
 }
 
 impl<'a, 'b> Node<'a, 'b> {
-    pub fn name(&self) -> &[u8] {
+    pub const fn name(&self) -> &[u8] {
         self.name
     }
 
-    pub fn nodes(&self) -> NodeIter<'a, 'b> {
+    pub const fn nodes(&self) -> NodeIter<'a, 'b> {
         NodeIter {
             tree: self.tree,
             offset: self.start,
@@ -131,7 +131,7 @@ impl<'a, 'b> Node<'a, 'b> {
         }
     }
 
-    pub fn properties(&'b self) -> PropertyIter<'a, 'b> {
+    pub const fn properties(&'b self) -> PropertyIter<'a, 'b> {
         PropertyIter {
             node: self,
             offset: self.start,
@@ -275,19 +275,19 @@ pub struct Property<'a, 'b> {
 }
 
 impl<'a, 'b> Property<'a, 'b> {
-    pub fn tree(&self) -> &'b DeviceTree<'a> {
+    pub const fn tree(&self) -> &'b DeviceTree<'a> {
         self.tree
     }
 
-    pub fn node(&self) -> &'b Node<'a, 'b> {
+    pub const fn node(&self) -> &'b Node<'a, 'b> {
         self.node
     }
 
-    pub fn name(&self) -> &[u8] {
+    pub const fn name(&self) -> &[u8] {
         self.name
     }
 
-    pub fn data(&self) -> &[u8] {
+    pub const fn data(&self) -> &[u8] {
         self.data
     }
 
@@ -487,7 +487,6 @@ fn get_str(strings: &[u8], off: u32) -> Option<&[u8]> {
 }
 
 pub static TREE: Once<Option<DeviceTree>> = Once::new();
-pub static DEVICES: Once<Vec<&Node>> = Once::new();
 
 #[task(
     name = "system.dt.root",
