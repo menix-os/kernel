@@ -4,7 +4,6 @@ pub mod event;
 pub mod mutex;
 pub mod once;
 pub mod ring;
-pub mod rwlock;
 pub mod spin;
 
 use num_traits::PrimInt;
