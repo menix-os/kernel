@@ -45,7 +45,14 @@ impl ExecFormat for ShebangFormat {
             .filter(|x| !x.is_empty()) // Skip whitespace.
             .map(|x| x.to_vec())
             .collect::<Vec<_>>();
-        args.append(&mut info.argv); // Append the rest to argv.
+
+        let mut script_args = if info.argv.is_empty() {
+            Vec::new()
+        } else {
+            info.argv.split_off(1)
+        };
+        args.push(info.exec_path.clone());
+        args.append(&mut script_args);
 
         info.argv = args;
 
