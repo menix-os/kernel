@@ -59,7 +59,7 @@ impl Queue {
     ) -> Result<Self, NvmeError> {
         let align = 0x1000;
         let sq_size = ((depth << 6) + align - 1) & !(align - 1);
-        let cq_size = ((depth * (size_of::<CompletionEntry>())) + align - 1) & !(align - 1);
+        let cq_size = ((depth * spec::cq_entry::SIZE) + align - 1) & !(align - 1);
         // Allocate memory the completion queue.
         let cq_pages = alloc_queue(cq_size)?;
         let cq_view = unsafe { MmioView::new(cq_pages.phys(), cq_size, VmCacheType::Uncacheable) };
@@ -240,7 +240,7 @@ impl IoQueue {
     ) -> Result<Self, NvmeError> {
         let align = 0x1000;
         let sq_size = ((depth << 6) + align - 1) & !(align - 1);
-        let cq_size = ((depth * size_of::<CompletionEntry>()) + align - 1) & !(align - 1);
+        let cq_size = ((depth * spec::cq_entry::SIZE) + align - 1) & !(align - 1);
 
         let cq_pages = alloc_queue(cq_size)?;
         let cq_view = unsafe { MmioView::new(cq_pages.phys(), cq_size, VmCacheType::Normal) };
