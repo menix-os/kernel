@@ -192,6 +192,7 @@ pub(crate) fn dispatch(frame: &mut Context) {
         numbers::FACCESSAT => vfs::faccessat,
         numbers::FCNTL => vfs::fcntl,
         numbers::FTRUNCATE => vfs::ftruncate,
+        numbers::TRUNCATE => vfs::truncate,
         numbers::FALLOCATE => vfs::fallocate,
         numbers::FADVISE => vfs::fadvise,
         numbers::UTIMENSAT => vfs::utimensat,

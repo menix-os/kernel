@@ -1030,6 +1030,36 @@ pub fn fchmod(fd: i32, mode: mode_t) -> EResult<()> {
 }
 
 #[wrap_syscall]
+pub fn truncate(path: VirtAddr, length: i64) -> EResult<()> {
+    if length < 0 {
+        return Err(Errno::EINVAL);
+    }
+
+    let v = UserCStr::new(path).as_vec(PATH_MAX).ok_or(Errno::EFAULT)?;
+
+    let proc = Scheduler::get_current().get_process();
+    let root = proc.root_dir.lock().clone();
+    let cwd = proc.working_dir.lock().clone();
+    let identity = proc.identity.lock().clone();
+
+    let node = PathNode::lookup(
+        root,
+        cwd,
+        &v,
+        &identity,
+        LookupFlags::MustExist | LookupFlags::FollowSymlinks,
+    )?;
+    let inode = node.entry.get_inode().ok_or(Errno::ENOENT)?;
+    inode.try_access(&identity, OpenFlags::Write, false)?;
+
+    match &inode.node_ops {
+        NodeOps::Regular(ops) => ops.truncate(&inode, length as u64),
+        NodeOps::Directory(_) => Err(Errno::EISDIR),
+        _ => Err(Errno::EINVAL),
+    }
+}
+
+#[wrap_syscall]
 pub fn ftruncate(fd: i32, length: i64) -> EResult<()> {
     if length < 0 {
         return Err(Errno::EINVAL);

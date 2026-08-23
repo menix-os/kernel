@@ -334,17 +334,14 @@ impl Ext2Regular {
 
 impl RegularOps for Ext2Regular {
     fn truncate(&self, node: &INode, new_length: u64) -> EResult<()> {
-        // For simplicity, only support truncating to 0 or reducing size.
         let mut raw = self.sb.read_inode(self.ino)?;
         let old_size = raw.size();
 
-        if new_length > old_size {
-            return Err(Errno::EINVAL);
+        if new_length < old_size {
+            // Release the data blocks past the new end of file.
+            let keep = new_length.div_ceil(self.sb.block_size as u64);
+            self.sb.truncate_blocks(&mut raw, keep)?;
         }
-
-        // Release the data blocks past the new end of file.
-        let keep = new_length.div_ceil(self.sb.block_size as u64);
-        self.sb.truncate_blocks(&mut raw, keep)?;
 
         // Update size and modification times.
         raw.i_size = new_length as u32;
