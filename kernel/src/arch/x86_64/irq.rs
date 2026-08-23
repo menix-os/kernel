@@ -346,7 +346,8 @@ fn page_fault_handler(context: &mut Context) {
 
     if !handled {
         let task = Scheduler::get_current();
-        let uar = task.uar.load(Ordering::Relaxed);
+        let uar = task.uar.load(Ordering::Acquire);
+        assert!(!uar.is_null());
         context.rip = unsafe { (*uar).fault_ip } as *const _ as u64;
     }
 }

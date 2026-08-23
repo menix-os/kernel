@@ -121,41 +121,41 @@ impl<T: PrimInt> Register<T> {
 }
 
 /// A [`Field`] is a subtype contained in a [`Register`].
-/// `T` is a register type, and `A` is the type of the relevant part of that register.
+/// `R` is the register type, and `F` is the type of the relevant part of that register.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Field<T: PrimInt, A: PrimInt> {
+pub struct Field<R: PrimInt, F: PrimInt> {
     field_offset: usize,
     bit_width: usize,
-    register: Register<T>,
-    _p: PhantomData<T>,
-    _a: PhantomData<A>,
+    register: Register<R>,
+    _p: PhantomData<R>,
+    _a: PhantomData<F>,
 }
 
-impl<T: PrimInt, A: PrimInt> Field<T, A> {
+impl<R: PrimInt, F: PrimInt> Field<R, F> {
     /// Creates a new field with native endianness.
-    pub const fn new(register: Register<T>, field_offset: usize) -> Self {
-        assert!((field_offset + size_of::<A>()) <= size_of::<T>());
+    pub const fn new(register: Register<R>, field_offset: usize) -> Self {
+        assert!((field_offset + size_of::<F>()) <= size_of::<R>());
         Self {
             _p: PhantomData,
             _a: PhantomData,
             register,
             field_offset: field_offset * 8,
-            bit_width: size_of::<A>() * 8,
+            bit_width: size_of::<F>() * 8,
         }
     }
 
     /// Creates a new field spanning the given bit range (inclusive).
-    pub const fn new_bits(register: Register<T>, range: RangeInclusive<usize>) -> Self {
+    pub const fn new_bits(register: Register<R>, range: RangeInclusive<usize>) -> Self {
         let start = *range.start();
         let end = *range.end();
         assert!(start <= end);
         assert!(
-            end < size_of::<T>() * u8::BITS as usize,
+            end < size_of::<R>() * u8::BITS as usize,
             "T is not large enough to store the field's value"
         );
         let width = end - start + 1;
         assert!(
-            width <= size_of::<A>() * u8::BITS as usize,
+            width <= size_of::<F>() * u8::BITS as usize,
             "A is not large enough to store the field's value"
         );
         Self {

@@ -144,5 +144,14 @@ pub struct UserAccessRegion {
     pub fault_ip: &'static unsafe extern "C" fn(),
 }
 
+impl UserAccessRegion {
+    /// Returns true if the IP is part of this [`UserAccessRegion`].
+    pub fn contains_ip(&self, ip: VirtAddr) -> bool {
+        let start = *self.start_ip as *const () as usize;
+        let end = *self.end_ip as *const () as usize;
+        (start..end).contains(&ip.value())
+    }
+}
+
 unsafe impl Sync for UserAccessRegion {}
 unsafe impl Send for UserAccessRegion {}

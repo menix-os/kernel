@@ -173,8 +173,8 @@ fn signal_or_panic(info: &PageFaultInfo) -> bool {
 
     // If there is no resolvable mapping here, but we were trying to copy from/to user memory,
     // fault gracefully via the user access region fixup.
-    let uar = task.uar.load(Ordering::Relaxed);
-    if !uar.is_null() {
+    let uar = task.uar.load(Ordering::Acquire);
+    if !uar.is_null() && unsafe { (*uar).contains_ip(info.ip) } {
         return false;
     }
 
